@@ -8,6 +8,9 @@ from PyQt6.QtGui import QAction, QColor
 from PyQt6.QtCore import Qt
 import pyqtgraph as pg
 
+print("Yeni sürüm yüklendi!")
+
+
 locale.setlocale(locale.LC_ALL, '')
 
 class ChartWindow(QDialog):
