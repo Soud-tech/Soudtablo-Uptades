@@ -2,8 +2,7 @@ import sys
 import re
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget, QMenuBar, QFileDialog, QColorDialog, QInputDialog, QPushButton,
-    QLabel, QHBoxLayout, QComboBox, QMessageBox
+    QWidget, QMenuBar, QFileDialog, QColorDialog, QMessageBox
 )
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt
@@ -22,8 +21,11 @@ class ExcelLikeApp(QMainWindow):
 
         self.formulas = {}
 
+        # Grafik widget'ı oluştur, koyu tema arka planı ve sabit yükseklik
         self.chartWidget = pg.PlotWidget()
-        self.chartWidget.setBackground("w")
+        self.chartWidget.setBackground("#2b2b2b")
+        self.chartWidget.setFixedHeight(200)
+        self.chartWidget.hide()  # Başta görünmesin
 
         layout = QVBoxLayout()
         layout.addWidget(self.table)
@@ -160,6 +162,9 @@ class ExcelLikeApp(QMainWindow):
         if x and y:
             self.chartWidget.clear()
             self.chartWidget.plot(x, y, pen="b", symbol="o")
+            self.chartWidget.show()  # Grafik görünür hale gelir
+        else:
+            QMessageBox.information(self, "Bilgi", "Grafik çizmek için yeterli veri yok.")
 
     def uppercase_cell(self, row, col):
         item = self.table.item(row, col)
