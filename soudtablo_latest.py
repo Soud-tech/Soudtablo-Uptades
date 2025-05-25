@@ -2,11 +2,25 @@ import sys
 import re
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget, QMenuBar, QFileDialog, QColorDialog, QMessageBox
+    QWidget, QMenuBar, QFileDialog, QColorDialog, QMessageBox, QComboBox, QToolBar
 )
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt
 import pyqtgraph as pg
+
+
+class GraphWindow(QWidget):
+    def __init__(self, x, y):
+        super().__init__()
+        self.setWindowTitle("Grafik")
+        self.resize(600, 400)
+        layout = QVBoxLayout()
+        self.chartWidget = pg.PlotWidget()
+        self.chartWidget.setBackground("#2b2b2b")
+        layout.addWidget(self.chartWidget)
+        self.setLayout(layout)
+        self.chartWidget.plot(x, y, pen="b", symbol="o")
+
 
 class ExcelLikeApp(QMainWindow):
     def __init__(self):
@@ -21,22 +35,16 @@ class ExcelLikeApp(QMainWindow):
 
         self.formulas = {}
 
-        # Grafik widget'ı oluştur, koyu tema arka planı ve sabit yükseklik
-        self.chartWidget = pg.PlotWidget()
-        self.chartWidget.setBackground("#2b2b2b")
-        self.chartWidget.setFixedHeight(200)
-        self.chartWidget.hide()  # Başta görünmesin
-
+        container = QWidget()
         layout = QVBoxLayout()
         layout.addWidget(self.table)
-        layout.addWidget(self.chartWidget)
-
-        container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
 
         self.create_menu()
         self.apply_dark_theme()
+
+        self.selected_currency = "₺"
 
     def apply_dark_theme(self):
         self.setStyleSheet("""
@@ -53,12 +61,16 @@ class ExcelLikeApp(QMainWindow):
                 background-color: #3c3f41;
                 color: white;
             }
+            QComboBox {
+                background-color: #3c3f41;
+                color: white;
+            }
         """)
 
     def create_menu(self):
         menu = self.menuBar()
-        file_menu = menu.addMenu("Dosya")
 
+        file_menu = menu.addMenu("Dosya")
         save_action = file_menu.addAction("Kaydet")
         save_action.triggered.connect(self.save_file)
 
@@ -66,8 +78,12 @@ class ExcelLikeApp(QMainWindow):
         load_action.triggered.connect(self.load_file)
 
         format_menu = menu.addMenu("Biçim")
-        currency_action = format_menu.addAction("Para Birimi Olarak Biçimlendir")
-        currency_action.triggered.connect(self.format_currency)
+        currency_menu = format_menu.addMenu("Para Birimi Seç")
+
+        currencies = ["₺", "$", "€", "£", "¥"]
+        for cur in currencies:
+            act = currency_menu.addAction(cur)
+            act.triggered.connect(lambda checked, c=cur: self.set_selected_currency(c))
 
         color_action = format_menu.addAction("Hücre Rengini Ayarla")
         color_action.triggered.connect(self.set_cell_color)
@@ -75,6 +91,10 @@ class ExcelLikeApp(QMainWindow):
         chart_menu = menu.addMenu("Grafik")
         plot_action = chart_menu.addAction("Grafik Çiz")
         plot_action.triggered.connect(self.plot_graph)
+
+    def set_selected_currency(self, currency):
+        self.selected_currency = currency
+        QMessageBox.information(self, "Para Birimi Seçildi", f"Para birimi: {currency}")
 
     def handle_cell_change(self, row, col):
         item = self.table.item(row, col)
@@ -131,7 +151,7 @@ class ExcelLikeApp(QMainWindow):
         if item:
             try:
                 number = float(item.text())
-                item.setText(f"{number:,.2f} ₺")
+                item.setText(f"{number:,.2f} {self.selected_currency}")
             except ValueError:
                 QMessageBox.warning(self, "Hata", "Bu hücrede geçerli bir sayı yok.")
 
@@ -160,9 +180,8 @@ class ExcelLikeApp(QMainWindow):
                 except:
                     continue
         if x and y:
-            self.chartWidget.clear()
-            self.chartWidget.plot(x, y, pen="b", symbol="o")
-            self.chartWidget.show()  # Grafik görünür hale gelir
+            self.graph_window = GraphWindow(x, y)
+            self.graph_window.show()
         else:
             QMessageBox.information(self, "Bilgi", "Grafik çizmek için yeterli veri yok.")
 
@@ -172,7 +191,6 @@ class ExcelLikeApp(QMainWindow):
             item.setText(item.text().upper())
 
 if __name__ == "__main__":
-    print("Yeni sürüm yüklendi!")
     app = QApplication(sys.argv)
     window = ExcelLikeApp()
     window.show()
