@@ -2,7 +2,7 @@ import sys
 import re
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget, QMenuBar, QFileDialog, QColorDialog, QMessageBox, QComboBox, QToolBar
+    QWidget, QMenuBar, QFileDialog, QColorDialog, QMessageBox, QComboBox, QToolBar, QAction
 )
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt
@@ -28,7 +28,8 @@ class ExcelLikeApp(QMainWindow):
         self.setWindowTitle("SoudTablo v1.0.1")
         self.resize(1000, 600)
 
-        self.table = QTableWidget(20, 10)
+        # Başlangıçta 100 satır ve 100 sütun
+        self.table = QTableWidget(100, 100)
         self.table.setFont(QFont("Arial", 12))
         self.table.cellChanged.connect(self.handle_cell_change)
         self.table.cellDoubleClicked.connect(self.uppercase_cell)
@@ -88,6 +89,13 @@ class ExcelLikeApp(QMainWindow):
         color_action = format_menu.addAction("Hücre Rengini Ayarla")
         color_action.triggered.connect(self.set_cell_color)
 
+        edit_menu = menu.addMenu("Düzen")
+        add_row_action = edit_menu.addAction("Satır Ekle")
+        add_row_action.triggered.connect(self.add_row)
+
+        add_col_action = edit_menu.addAction("Sütun Ekle")
+        add_col_action.triggered.connect(self.add_column)
+
         chart_menu = menu.addMenu("Grafik")
         plot_action = chart_menu.addAction("Grafik Çiz")
         plot_action.triggered.connect(self.plot_graph)
@@ -105,9 +113,14 @@ class ExcelLikeApp(QMainWindow):
             self.formulas[(row, col)] = text
             value = self.evaluate_formula(text[1:])
             if value is not None:
+                self.table.blockSignals(True)
                 item.setText(str(value))
+                self.table.blockSignals(False)
         elif (row, col) in self.formulas:
             del self.formulas[(row, col)]
+
+        self.apply_currency_format(row, col)
+        self.update_all_formulas()
 
     def evaluate_formula(self, formula):
         try:
@@ -145,15 +158,26 @@ class ExcelLikeApp(QMainWindow):
                     for col, val in enumerate(values):
                         self.table.setItem(row, col, QTableWidgetItem(val))
 
-    def format_currency(self):
-        row, col = self.table.currentRow(), self.table.currentColumn()
+    def apply_currency_format(self, row, col):
         item = self.table.item(row, col)
         if item:
             try:
                 number = float(item.text())
+                self.table.blockSignals(True)
                 item.setText(f"{number:,.2f} {self.selected_currency}")
+                self.table.blockSignals(False)
             except ValueError:
-                QMessageBox.warning(self, "Hata", "Bu hücrede geçerli bir sayı yok.")
+                pass
+
+    def update_all_formulas(self):
+        for (r, c), formula in self.formulas.items():
+            val = self.evaluate_formula(formula[1:])
+            if val is not None:
+                item = self.table.item(r, c)
+                if item:
+                    self.table.blockSignals(True)
+                    item.setText(str(val))
+                    self.table.blockSignals(False)
 
     def set_cell_color(self):
         color = QColorDialog.getColor()
@@ -189,6 +213,13 @@ class ExcelLikeApp(QMainWindow):
         item = self.table.item(row, col)
         if item:
             item.setText(item.text().upper())
+
+    def add_row(self):
+        self.table.setRowCount(self.table.rowCount() + 1)
+
+    def add_column(self):
+        self.table.setColumnCount(self.table.columnCount() + 1)
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
