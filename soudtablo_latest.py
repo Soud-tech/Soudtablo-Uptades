@@ -2,9 +2,9 @@ import sys
 import re
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget, QMenuBar, QFileDialog, QColorDialog, QMessageBox, QComboBox, QToolBar, QAction
+    QWidget, QFileDialog, QColorDialog, QMessageBox, QMenuBar, QMenu
 )
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor, QFont, QAction
 from PyQt6.QtCore import Qt
 import pyqtgraph as pg
 
@@ -25,12 +25,14 @@ class GraphWindow(QWidget):
 class ExcelLikeApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SoudTablo v1.0.1")
-        self.resize(1000, 600)
+        self.setWindowTitle("SoudTablo v1.0.2")
+        self.resize(1200, 700)
 
-        # Başlangıçta 100 satır ve 100 sütun
-        self.table = QTableWidget(100, 100)
-        self.table.setFont(QFont("Arial", 12))
+        self.row_count = 100
+        self.col_count = 100
+
+        self.table = QTableWidget(self.row_count, self.col_count)
+        self.table.setFont(QFont("Arial", 10))
         self.table.cellChanged.connect(self.handle_cell_change)
         self.table.cellDoubleClicked.connect(self.uppercase_cell)
 
@@ -62,7 +64,11 @@ class ExcelLikeApp(QMainWindow):
                 background-color: #3c3f41;
                 color: white;
             }
-            QComboBox {
+            QMenuBar {
+                background-color: #2b2b2b;
+                color: white;
+            }
+            QMenu {
                 background-color: #3c3f41;
                 color: white;
             }
@@ -72,33 +78,39 @@ class ExcelLikeApp(QMainWindow):
         menu = self.menuBar()
 
         file_menu = menu.addMenu("Dosya")
-        save_action = file_menu.addAction("Kaydet")
+        save_action = QAction("Kaydet", self)
         save_action.triggered.connect(self.save_file)
+        file_menu.addAction(save_action)
 
-        load_action = file_menu.addAction("Yükle")
+        load_action = QAction("Yükle", self)
         load_action.triggered.connect(self.load_file)
+        file_menu.addAction(load_action)
+
+        add_rows_action = QAction("Satır Ekle", self)
+        add_rows_action.triggered.connect(self.add_rows)
+        file_menu.addAction(add_rows_action)
+
+        add_cols_action = QAction("Sütun Ekle", self)
+        add_cols_action.triggered.connect(self.add_columns)
+        file_menu.addAction(add_cols_action)
 
         format_menu = menu.addMenu("Biçim")
         currency_menu = format_menu.addMenu("Para Birimi Seç")
 
         currencies = ["₺", "$", "€", "£", "¥"]
         for cur in currencies:
-            act = currency_menu.addAction(cur)
+            act = QAction(cur, self)
             act.triggered.connect(lambda checked, c=cur: self.set_selected_currency(c))
+            currency_menu.addAction(act)
 
-        color_action = format_menu.addAction("Hücre Rengini Ayarla")
+        color_action = QAction("Hücre Rengini Ayarla", self)
         color_action.triggered.connect(self.set_cell_color)
-
-        edit_menu = menu.addMenu("Düzen")
-        add_row_action = edit_menu.addAction("Satır Ekle")
-        add_row_action.triggered.connect(self.add_row)
-
-        add_col_action = edit_menu.addAction("Sütun Ekle")
-        add_col_action.triggered.connect(self.add_column)
+        format_menu.addAction(color_action)
 
         chart_menu = menu.addMenu("Grafik")
-        plot_action = chart_menu.addAction("Grafik Çiz")
+        plot_action = QAction("Grafik Çiz", self)
         plot_action.triggered.connect(self.plot_graph)
+        chart_menu.addAction(plot_action)
 
     def set_selected_currency(self, currency):
         self.selected_currency = currency
@@ -113,24 +125,44 @@ class ExcelLikeApp(QMainWindow):
             self.formulas[(row, col)] = text
             value = self.evaluate_formula(text[1:])
             if value is not None:
-                self.table.blockSignals(True)
-                item.setText(str(value))
-                self.table.blockSignals(False)
+                # Biçimlendirmeyi para birimi olarak da uygulayalım
+                if isinstance(value, (int, float)):
+                    try:
+                        value_float = float(value)
+                        item.setText(f"{value_float:,.2f} {self.selected_currency}")
+                    except:
+                        item.setText(str(value))
+                else:
+                    item.setText(str(value))
         elif (row, col) in self.formulas:
             del self.formulas[(row, col)]
-
-        self.apply_currency_format(row, col)
-        self.update_all_formulas()
 
     def evaluate_formula(self, formula):
         try:
             refs = re.findall(r"[A-Z]+\d+", formula)
             for ref in refs:
-                col = ord(ref[0]) - ord("A")
-                row = int(ref[1:]) - 1
+                col = 0
+                for i, ch in enumerate(ref):
+                    if ch.isdigit():
+                        col_str = ref[:i]
+                        row_str = ref[i:]
+                        break
+                else:
+                    col_str = ref
+                    row_str = ''
+                col = 0
+                for idx, c in enumerate(reversed(col_str)):
+                    col += (ord(c) - ord('A') + 1) * (26 ** idx)
+                col -= 1
+                row = int(row_str) - 1 if row_str else 0
                 ref_item = self.table.item(row, col)
                 val = ref_item.text() if ref_item else "0"
-                formula = formula.replace(ref, val)
+                # Sayısal olmayan değerleri 0 olarak al
+                try:
+                    val_float = float(val.replace(',', '').replace(self.selected_currency, '').strip())
+                except:
+                    val_float = 0
+                formula = formula.replace(ref, str(val_float))
             return eval(formula)
         except:
             return None
@@ -152,32 +184,13 @@ class ExcelLikeApp(QMainWindow):
             with open(path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
                 self.table.setRowCount(len(lines))
+                max_col = 0
                 for row, line in enumerate(lines):
                     values = line.strip().split(",")
-                    self.table.setColumnCount(max(self.table.columnCount(), len(values)))
+                    max_col = max(max_col, len(values))
                     for col, val in enumerate(values):
                         self.table.setItem(row, col, QTableWidgetItem(val))
-
-    def apply_currency_format(self, row, col):
-        item = self.table.item(row, col)
-        if item:
-            try:
-                number = float(item.text())
-                self.table.blockSignals(True)
-                item.setText(f"{number:,.2f} {self.selected_currency}")
-                self.table.blockSignals(False)
-            except ValueError:
-                pass
-
-    def update_all_formulas(self):
-        for (r, c), formula in self.formulas.items():
-            val = self.evaluate_formula(formula[1:])
-            if val is not None:
-                item = self.table.item(r, c)
-                if item:
-                    self.table.blockSignals(True)
-                    item.setText(str(val))
-                    self.table.blockSignals(False)
+                self.table.setColumnCount(max_col)
 
     def set_cell_color(self):
         color = QColorDialog.getColor()
@@ -197,8 +210,8 @@ class ExcelLikeApp(QMainWindow):
             y_item = self.table.item(row, 1)
             if x_item and y_item:
                 try:
-                    x_val = float(x_item.text())
-                    y_val = float(y_item.text())
+                    x_val = float(x_item.text().replace(',', '').replace(self.selected_currency, '').strip())
+                    y_val = float(y_item.text().replace(',', '').replace(self.selected_currency, '').strip())
                     x.append(x_val)
                     y.append(y_val)
                 except:
@@ -214,11 +227,13 @@ class ExcelLikeApp(QMainWindow):
         if item:
             item.setText(item.text().upper())
 
-    def add_row(self):
-        self.table.setRowCount(self.table.rowCount() + 1)
+    def add_rows(self):
+        current_rows = self.table.rowCount()
+        self.table.setRowCount(current_rows + 10)
 
-    def add_column(self):
-        self.table.setColumnCount(self.table.columnCount() + 1)
+    def add_columns(self):
+        current_cols = self.table.columnCount()
+        self.table.setColumnCount(current_cols + 10)
 
 
 if __name__ == "__main__":
