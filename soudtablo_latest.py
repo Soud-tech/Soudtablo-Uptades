@@ -328,9 +328,9 @@ def redo(self):
         self.is_undo_redo_action = True
         self.table.setItem(row, col, QTableWidgetItem(new_text))
         self.is_undo_redo_action = False
-if name == "main":
-app = QApplication(sys.argv)
-window = ExcelLikeApp()
-window.show()
-sys.exit(app.exec())
-               
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = ExcelLikeApp()
+    window.show()
+    sys.exit(app.exec())
+            
