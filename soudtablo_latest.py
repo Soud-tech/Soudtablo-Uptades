@@ -22,10 +22,34 @@ class GraphWindow(QWidget):
         self.chartWidget.plot(x, y, pen="b", symbol="o")
 
 
+class UndoRedoStack:
+    def __init__(self):
+        self.undo_stack = []
+        self.redo_stack = []
+
+    def push(self, row, col, old_text, new_text):
+        self.undo_stack.append((row, col, old_text, new_text))
+        self.redo_stack.clear()
+
+    def undo(self):
+        if not self.undo_stack:
+            return None
+        change = self.undo_stack.pop()
+        self.redo_stack.append(change)
+        return change
+
+    def redo(self):
+        if not self.redo_stack:
+            return None
+        change = self.redo_stack.pop()
+        self.undo_stack.append(change)
+        return change
+
+
 class ExcelLikeApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SoudTablo v1.0.2")
+        self.setWindowTitle("SoudTablo v1.0.3")
         self.resize(1200, 700)
 
         self.row_count = 100
@@ -37,6 +61,10 @@ class ExcelLikeApp(QMainWindow):
         self.table.cellDoubleClicked.connect(self.uppercase_cell)
 
         self.formulas = {}
+        self.ignore_cell_change = False  # Döngü önlemek için flag
+
+        self.undo_redo = UndoRedoStack()
+        self.is_undo_redo_action = False  # undo/redo esnasında cellChanged çalışmasın diye
 
         container = QWidget()
         layout = QVBoxLayout()
@@ -94,6 +122,17 @@ class ExcelLikeApp(QMainWindow):
         add_cols_action.triggered.connect(self.add_columns)
         file_menu.addAction(add_cols_action)
 
+        edit_menu = menu.addMenu("Düzen")
+        undo_action = QAction("Geri Al (Undo)", self)
+        undo_action.setShortcut("Ctrl+Z")
+        undo_action.triggered.connect(self.undo)
+        edit_menu.addAction(undo_action)
+
+        redo_action = QAction("İleri Al (Redo)", self)
+        redo_action.setShortcut("Ctrl+Y")
+        redo_action.triggered.connect(self.redo)
+        edit_menu.addAction(redo_action)
+
         format_menu = menu.addMenu("Biçim")
         currency_menu = format_menu.addMenu("Para Birimi Seç")
 
@@ -114,28 +153,76 @@ class ExcelLikeApp(QMainWindow):
 
     def set_selected_currency(self, currency):
         self.selected_currency = currency
+        self.reformat_all_currency_cells()
         QMessageBox.information(self, "Para Birimi Seçildi", f"Para birimi: {currency}")
 
+    def reformat_all_currency_cells(self):
+        self.ignore_cell_change = True
+        for row in range(self.table.rowCount()):
+            for col in range(self.table.columnCount()):
+                item = self.table.item(row, col)
+                if item and item.text():
+                    text = item.text()
+                    # Sadece sayı içeren hücrelere uygula
+                    try:
+                        val_float = float(text.replace(',', '').replace(self.selected_currency, '').strip())
+                        item.setText(f"{val_float:,.2f} {self.selected_currency}")
+                        self.apply_conditional_formatting(row, col, val_float)
+                    except:
+                        pass
+        self.ignore_cell_change = False
+
     def handle_cell_change(self, row, col):
+        if self.ignore_cell_change:
+            return
+        if self.is_undo_redo_action:
+            return
+
         item = self.table.item(row, col)
         if not item:
             return
-        text = item.text()
+
+        old_text = getattr(item, "_old_text", "")
+        new_text = item.text()
+
+        # Undo stack'a eski-yeni değerleri ekle
+        self.undo_redo.push(row, col, old_text, new_text)
+        item._old_text = new_text  # eski değer olarak kaydet
+
+        text = new_text
         if text.startswith("="):
             self.formulas[(row, col)] = text
             value = self.evaluate_formula(text[1:])
             if value is not None:
-                # Biçimlendirmeyi para birimi olarak da uygulayalım
                 if isinstance(value, (int, float)):
                     try:
                         value_float = float(value)
                         item.setText(f"{value_float:,.2f} {self.selected_currency}")
+                        self.apply_conditional_formatting(row, col, value_float)
                     except:
                         item.setText(str(value))
                 else:
                     item.setText(str(value))
         elif (row, col) in self.formulas:
             del self.formulas[(row, col)]
+            self.apply_conditional_formatting(row, col, None)
+        else:
+            # Eğer formül yoksa, sayısal değer varsa koşullu renklendirme uygula
+            try:
+                val_float = float(text.replace(',', '').replace(self.selected_currency, '').strip())
+                self.apply_conditional_formatting(row, col, val_float)
+            except:
+                self.apply_conditional_formatting(row, col, None)
+
+    def apply_conditional_formatting(self, row, col, val):
+        item = self.table.item(row, col)
+        if not item:
+            return
+        # Örnek koşul: değer 100'den büyükse arka plan yeşil, değilse normal
+        if val is not None and val > 100:
+            item.setBackground(QColor(0, 150, 0, 150))  # yarı saydam yeşil
+        else:
+            item.setBackground(QColor(60, 63, 65))  # koyu gri (uyumlu tema arka plan)
 
     def evaluate_formula(self, formula):
         try:
@@ -157,7 +244,6 @@ class ExcelLikeApp(QMainWindow):
                 row = int(row_str) - 1 if row_str else 0
                 ref_item = self.table.item(row, col)
                 val = ref_item.text() if ref_item else "0"
-                # Sayısal olmayan değerleri 0 olarak al
                 try:
                     val_float = float(val.replace(',', '').replace(self.selected_currency, '').strip())
                 except:
@@ -183,6 +269,7 @@ class ExcelLikeApp(QMainWindow):
         if path:
             with open(path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
+                self.ignore_cell_change = True
                 self.table.setRowCount(len(lines))
                 max_col = 0
                 for row, line in enumerate(lines):
@@ -190,54 +277,60 @@ class ExcelLikeApp(QMainWindow):
                     max_col = max(max_col, len(values))
                     for col, val in enumerate(values):
                         self.table.setItem(row, col, QTableWidgetItem(val))
-                self.table.setColumnCount(max_col)
-
-    def set_cell_color(self):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            row, col = self.table.currentRow(), self.table.currentColumn()
-            item = self.table.item(row, col)
-            if not item:
-                item = QTableWidgetItem()
-                self.table.setItem(row, col, item)
+                        # Eski değer kaydet (undo için)
+                        item = self.table.item(row, col)
+                        if item:
+                            item._old_text = val
+self.table.setColumnCount(max_col)
+self.ignore_cell_change = False 
+def set_cell_color(self):
+    color = QColorDialog.getColor()
+    if color.isValid():
+        for item in self.table.selectedItems():
             item.setBackground(color)
 
-    def plot_graph(self):
-        x = []
-        y = []
-        for row in range(self.table.rowCount()):
-            x_item = self.table.item(row, 0)
-            y_item = self.table.item(row, 1)
-            if x_item and y_item:
-                try:
-                    x_val = float(x_item.text().replace(',', '').replace(self.selected_currency, '').strip())
-                    y_val = float(y_item.text().replace(',', '').replace(self.selected_currency, '').strip())
-                    x.append(x_val)
-                    y.append(y_val)
-                except:
-                    continue
-        if x and y:
-            self.graph_window = GraphWindow(x, y)
-            self.graph_window.show()
-        else:
-            QMessageBox.information(self, "Bilgi", "Grafik çizmek için yeterli veri yok.")
+def add_rows(self):
+    self.table.insertRow(self.table.rowCount())
 
-    def uppercase_cell(self, row, col):
-        item = self.table.item(row, col)
-        if item:
-            item.setText(item.text().upper())
+def add_columns(self):
+    self.table.insertColumn(self.table.columnCount())
 
-    def add_rows(self):
-        current_rows = self.table.rowCount()
-        self.table.setRowCount(current_rows + 10)
+def uppercase_cell(self, row, col):
+    item = self.table.item(row, col)
+    if item:
+        item.setText(item.text().upper())
 
-    def add_columns(self):
-        current_cols = self.table.columnCount()
-        self.table.setColumnCount(current_cols + 10)
+def plot_graph(self):
+    x, y = [], []
+    for item in self.table.selectedItems():
+        try:
+            val = float(item.text().replace(',', '').replace(self.selected_currency, '').strip())
+            y.append(val)
+            x.append(len(x) + 1)
+        except:
+            continue
+    if x and y:
+        self.graph = GraphWindow(x, y)
+        self.graph.show()
 
+def undo(self):
+    change = self.undo_redo.undo()
+    if change:
+        row, col, old_text, new_text = change
+        self.is_undo_redo_action = True
+        self.table.setItem(row, col, QTableWidgetItem(old_text))
+        self.is_undo_redo_action = False
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = ExcelLikeApp()
-    window.show()
-    sys.exit(app.exec())
+def redo(self):
+    change = self.undo_redo.redo()
+    if change:
+        row, col, old_text, new_text = change
+        self.is_undo_redo_action = True
+        self.table.setItem(row, col, QTableWidgetItem(new_text))
+        self.is_undo_redo_action = False
+if name == "main":
+app = QApplication(sys.argv)
+window = ExcelLikeApp()
+window.show()
+sys.exit(app.exec())
+               
